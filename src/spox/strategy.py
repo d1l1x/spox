@@ -25,9 +25,9 @@ Task = Callable[[StrategyContext], Awaitable[None]]
 @dataclass(frozen=True)
 class IBConnectionConfig:
     host: str = "127.0.0.1"
-    port: int = 7497          # 7497 paper TWS, 7496 live TWS (common defaults)
+    port: int = 7497
     client_id: int = 42
-    readonly: bool = False    # if supported by your stack
+    readonly: bool = False 
 
 
 class StrategyError(Exception):
@@ -56,8 +56,6 @@ class StrategyBase(ABC):
 
         self.ctx = StrategyContext(ib=self.ib, log=self.log, account=self.account, tz=self.tz)
 
-
-
     async def connect(self) -> None:
         if self.ib.isConnected():
             self.log.debug("Already connected to IB.")
@@ -69,18 +67,20 @@ class StrategyBase(ABC):
             self.conn.port,
             self.conn.client_id,
         )
-        try:
-            await self.ib.connectAsync(
-                host=self.conn.host,
-                port=self.conn.port,
-                clientId=self.conn.client_id,
-                readonly=self.conn.readonly,
-            )
-        except Exception:
-            self.log.exception("Failed to connect to IB.")
-            raise
-        else:
-            self.log.info("Connected to IB.")
+
+        while not self.ib.isConnected():
+            try:
+                await self.ib.connectAsync(
+                    host=self.conn.host,
+                    port=self.conn.port,
+                    clientId=self.conn.client_id,
+                    readonly=self.conn.readonly,
+                )
+            except Exception as e:
+                self.log.warning(f'Connection error: {e}, retrying in 5s')
+                await asyncio.sleep(5)
+            else:
+                self.log.info("Connected to IB.")
 
     def disconnect(self) -> None:
         if not self.ib.isConnected():
@@ -93,8 +93,6 @@ class StrategyBase(ABC):
     @abstractmethod
     async def run(self):
         raise NotImplementedError
-
-
 
 
 class ScheduledStrategy(StrategyBase):
@@ -115,15 +113,13 @@ class ScheduledStrategy(StrategyBase):
         if not self._tasks:
             raise StrategyError('No tasks: self._tasks is empty. Use add_task.')
 
-        await self.connect()
-
         for t in self._tasks:
 
             async def runner(task=t):
+                await self.connect()
                 await task(self.ctx)
 
             self.scheduler.add_job( runner, trigger=self.trigger, name=self.name)
-
 
         self.scheduler.start()
 
@@ -131,5 +127,3 @@ class ScheduledStrategy(StrategyBase):
             await asyncio.Event().wait()
         finally:
             self.disconnect()
-
-
