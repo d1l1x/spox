@@ -9,6 +9,7 @@ import asyncio
 from ib_async import Option, Contract, Ticker
 
 from spox.core.component import Component
+from spox.core.filter import Filter
 
 class Right(str, Enum):
     CALL = "C"
@@ -108,6 +109,11 @@ class OptionStrategy(Component):
         self.underlying = underlying
         self.spec = spec
         self.opt = OptionFactory(option_contract_spec)
+
+        self.filters: List[Filter] = []
+
+    def add_filter(self, filter: Filter):
+        self.filters.append(filter)
 
     async def wait_for_greeks(self, tickers: List[Ticker], timeout: float = 3.0) -> bool:
         """
@@ -285,3 +291,17 @@ class OptionStrategy(Component):
             key=lambda t: (abs(t.modelGreeks.delta - self.spec.target_delta), -t.bid),
         )
         return best.contract
+
+    async def filters_ready(self):
+        if not self.filters:
+            return True
+
+        fs = [f.evaluate() for f in self.filters]
+
+        self.ctx.log.info(f"Check filters: {[f.__class__.__name__ for f in self.filters]}")
+
+        ready = await asyncio.gather(*fs)
+
+        self.ctx.log.info(f"Filters ready: {[bool(i) for i in ready]}")
+
+        return all(ready)
