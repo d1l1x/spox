@@ -103,21 +103,21 @@ class ScheduledStrategy(StrategyBase):
         # self.tz comes from super class
         self.scheduler = scheduler or AsyncIOScheduler(timezone=self.tz)
 
-        self._tasks: List[Task] = []
+        self._trades: List[Task] = []
 
-    def add_task(self, task: Task) -> None:
-        self._tasks.append(task)
+    def add_trade(self, trade: Task) -> None:
+        self._trades.append(trade)
 
     async def run(self):
 
-        if not self._tasks:
-            raise StrategyError('No tasks: self._tasks is empty. Use add_task.')
+        if not self._trades:
+            raise StrategyError('No trades: self._tasks is empty. Use add_task.')
 
-        for t in self._tasks:
+        for t in self._trades:
 
-            async def runner(task=t):
+            async def runner(trade=t):
                 await self.connect()
-                await task(self.ctx)
+                await trade(self.ctx)
 
             self.scheduler.add_job( runner, trigger=self.trigger, name=self.name)
 
