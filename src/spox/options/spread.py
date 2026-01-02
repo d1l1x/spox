@@ -79,4 +79,6 @@ class Spread(OptionStrategy):
             )
         long= long_contracts[0]
 
+        self.ctx.log.info(f'Selected: short(strike={short.strike}) long(strike={long.strike})')
+
         return short, long
