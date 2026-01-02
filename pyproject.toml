@@ -13,6 +13,7 @@ dependencies = [
     "ta-lib",
     "apscheduler",
     "pytest",
+    "numpy",
 ]
 authors = [{ name = "Spox contributors" }]
 license = { text = "MIT" }
