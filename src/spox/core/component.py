@@ -24,4 +24,4 @@ class Component(ABC):
 
     @property
     def instrument(self):
-        return self.ctx.instrument
+        return self.ctx.instruments
