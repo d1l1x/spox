@@ -1,22 +1,22 @@
+import asyncio
+from datetime import time
 from typing import Tuple
 
-from dataclasses import dataclass
+# from dataclasses import dataclass
 from enum import Enum
 import math
 
 from ib_async import (
-    Contract,
     Option,
     ComboLeg,
     Bag,
-    LimitOrder
 )
 from .core import (
     OptionStrategy,
     Right,
-    OptionContractSpec,
-    VerticalSpec
 )
+from spox.core.helper import total_seconds
+from spox.core.orders import FillProgression
 
 
 class SpreadType(Enum):
@@ -24,12 +24,12 @@ class SpreadType(Enum):
     DEBIT = 2
 
 
-@dataclass(frozen=True, slots=True)
-class Sspread:
-    right: Right
-    stype: SpreadType
-    spec: VerticalSpec
-    contract_spec: OptionContractSpec
+# @dataclass(frozen=True, slots=True)
+# class Sspread:
+#     right: Right
+#     stype: SpreadType
+#     spec: VerticalSpec
+#     contract_spec: OptionContractSpec
 
 
 class Spread(OptionStrategy):
@@ -80,6 +80,7 @@ class Spread(OptionStrategy):
             self.log.error(f"No valid spot price for {self.underlying}: {spot_ticker}")
             return Option(), Option()
 
+        self.log.info("Search for matching strikes")
         strikes = self._get_strike_candidates(spot, self.right, inc=self.spec.inc)
 
         short_contracts = await self._get_contracts(
@@ -103,36 +104,42 @@ class Spread(OptionStrategy):
 
         return short, long
 
-    async def buy(self):
 
-        short, long= await self.build()
+    async def buy(self, timeout:time, fill_progression:FillProgression|None = None):
 
-        leg1 = ComboLeg()
-        leg1.conId = long.conId
-        leg1.ratio = 1
-        leg1.action = "BUY"
-        leg1.exchange = "SMART"
-        leg2 = ComboLeg()
-        leg2.conId = short.conId
-        leg2.ratio = 1
-        leg2.action = "SELL"
-        leg2.exchange = "SMART"
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + total_seconds(timeout)
 
-        combo = Bag(
-            symbol = self.opt.spec.symbol,
-            exchange=self.opt.spec.exchange,
-            currency=self.opt.spec.currency,
-            comboLegs=[leg1, leg2]
-            )
+        trade = None
 
-        tickers = await self.ib.reqTickersAsync(*[short, long])
+        while trade is None:
 
-        # For bull put spread
-        for ticker in tickers:
-            if ticker.contract.strike == short.strike:
-                bid = ticker.bid
-            if ticker.contract.strike == long.strike:
-                ask = ticker.ask
-        lmt = ask-bid
+            if loop.time() >= deadline:
+                self.log.warning(f'Deadline for trade execution exceeded')
+                break
 
-        await self.om.limit_buy(combo, 1, lmt)
+            short, long= await self.build()
+
+            leg1 = ComboLeg(conId=long.conId, ratio=1, action="BUY", exchange="SMART")
+            leg2 = ComboLeg(conId=short.conId, ratio=1, action="SELL", exchange="SMART")
+
+            combo = Bag(
+                symbol = self.opt.spec.symbol,
+                exchange=self.opt.spec.exchange,
+                currency=self.opt.spec.currency,
+                comboLegs=[leg1, leg2]
+                )
+
+            tickers = await self.ib.reqTickersAsync(*[short, long])
+
+            # For bull put spread
+            for ticker in tickers:
+                if ticker.contract.strike == short.strike:
+                    bid = ticker.bid
+                if ticker.contract.strike == long.strike:
+                    ask = ticker.ask
+            lmt = ask-bid
+
+            trade = await self.om.limit_buy(combo, 1, lmt, progression=fill_progression)
+
+        return trade
