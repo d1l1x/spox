@@ -18,7 +18,7 @@ from apscheduler.triggers.base import BaseTrigger
 from zoneinfo import ZoneInfo
 
 from spox.core.context import StrategyContext
-from spox.core.market_data import MarketDataTypeManager
+from spox.core.market_data import MarketDataTypeManager, MarketDataType
 
 
 Task = Callable[[StrategyContext], Awaitable[None]]
@@ -48,6 +48,7 @@ class StrategyBase(ABC):
         conn: Optional[IBConnectionConfig] = None,
         account: Optional[str] = None,
         tz: Optional[ZoneInfo] = None,
+        md_type: int|None = None,
     ) -> None:
 
         if not isinstance(instruments, list): 
@@ -69,6 +70,11 @@ class StrategyBase(ABC):
             tz=self.tz,
             instruments=self.instruments
             )
+
+        self.md = MarketDataTypeManager(
+            self.ctx,
+            prefer_liquid_hours=True,
+            md_type=md_type or MarketDataType.LIVE.value)
 
     async def connect(self) -> None:
         if self.ib.isConnected():
@@ -119,6 +125,7 @@ class ScheduledStrategy(StrategyBase):
 
         self._trades: List[Task] = []
 
+
     def add_trade(self, trade: Task) -> None:
         self._trades.append(trade)
 
@@ -133,8 +140,7 @@ class ScheduledStrategy(StrategyBase):
                 await self.connect()
 
                 for i in self.instruments:
-                    md = MarketDataTypeManager(self.ctx, prefer_liquid_hours=True)
-                    await md.ensure_md_type_for_now(i)
+                    await self.md.ensure_md_type(i)
 
                 await trade(self.ctx)
 

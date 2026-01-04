@@ -30,26 +30,24 @@ class MarketDataTypeManager(Component):
     Switches market data type only when needed.
     """
 
-    def __init__(self, ctx, *, prefer_liquid_hours: bool = True):
+    def __init__(self, ctx, *, prefer_liquid_hours: bool = True, md_type:int|None = None):
         super().__init__(ctx)
         self.prefer_liquid_hours = prefer_liquid_hours
         self._cache_key: Optional[tuple] = None
         self._cache: Optional[SessionSchedule] = None
-        self._current_md_type: Optional[int] = None
+        # self._current_md_type: Optional[int] = None
+        self.md_type = md_type or MarketDataType.LIVE.value
 
-    async def ensure_md_type_for_now(self, contract, *, open_type: int = MarketDataType.LIVE.value, closed_type: int = MarketDataType.FROZEN.value) -> int:
+    async def ensure_md_type(self, contract) -> None:
         sched = await self._get_schedule(contract)
-        now = datetime.now(self.tz)
 
-        desired = open_type if sched.is_open() else closed_type
-        if desired != self._current_md_type:
-            self.ib.reqMarketDataType(desired)
-            self._current_md_type = desired
-            self.log.info("Market data type set to %s (%s)", desired, "OPEN" if desired == open_type else "CLOSED")
+        if sched.is_open():
+            self.ctx.log.info(f"Market for {contract.symbol} is currently: OPEN")
         else:
-            self.log.debug("Market data type unchanged (%s)", desired)
+            self.ctx.log.info(f"Market for {contract.symbol} is currently: CLOSED")
 
-        return desired
+        self.ctx.log.info(f"Setting Market data type to: {self.md_type}")
+        self.ib.reqMarketDataType(self.md_type)
 
     async def _get_schedule(self, contract) -> SessionSchedule:
         # cache per-contract per-date
