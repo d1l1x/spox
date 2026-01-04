@@ -21,3 +21,7 @@ class Component(ABC):
     @property
     def tz(self):
         return self.ctx.tz
+
+    @property
+    def instrument(self):
+        return self.ctx.instrument

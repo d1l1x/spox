@@ -8,6 +8,7 @@ from typing import Awaitable, Optional, Callable, List
 
 from ib_async import (
     IB,
+    Contract
 )
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -17,6 +18,7 @@ from apscheduler.triggers.base import BaseTrigger
 from zoneinfo import ZoneInfo
 
 from spox.core.context import StrategyContext
+from spox.core.market_data import MarketDataTypeManager
 
 
 Task = Callable[[StrategyContext], Awaitable[None]]
@@ -38,14 +40,20 @@ class StrategyBase(ABC):
 
     def __init__(
         self,
-        *,
+        instruments: List[Contract],
         name: str,
+        *,
         ib: Optional[IB] = None,
         logger: Optional[logging.Logger] = None,
         conn: Optional[IBConnectionConfig] = None,
         account: Optional[str] = None,
         tz: Optional[ZoneInfo] = None,
     ) -> None:
+
+        if not isinstance(instruments, list): 
+            raise TypeError(f"{self.__class__}: `instruments` must be a list of contracts")
+        else:
+            self.instruments = instruments
         self.name = name
         self.ib: IB = ib or IB()
         self.conn = conn or IBConnectionConfig()
@@ -54,7 +62,13 @@ class StrategyBase(ABC):
 
         self.log = logger or logging.getLogger(f"strategy.{self.name}")
 
-        self.ctx = StrategyContext(ib=self.ib, log=self.log, account=self.account, tz=self.tz)
+        self.ctx = StrategyContext(
+            ib=self.ib,
+            log=self.log,
+            account=self.account,
+            tz=self.tz,
+            instruments=self.instruments
+            )
 
     async def connect(self) -> None:
         if self.ib.isConnected():
@@ -97,8 +111,8 @@ class StrategyBase(ABC):
 
 class ScheduledStrategy(StrategyBase):
 
-    def __init__(self, trigger:BaseTrigger, scheduler=None, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, instruments:List[Contract], name:str, *, trigger:BaseTrigger, scheduler=None, **kwargs):
+        super().__init__(instruments, name, **kwargs)
         self.trigger = trigger
         # self.tz comes from super class
         self.scheduler = scheduler or AsyncIOScheduler(timezone=self.tz)
@@ -117,6 +131,11 @@ class ScheduledStrategy(StrategyBase):
 
             async def runner(trade=t):
                 await self.connect()
+
+                for i in self.instruments:
+                    md = MarketDataTypeManager(self.ctx, prefer_liquid_hours=True)
+                    await md.ensure_md_type_for_now(i)
+
                 await trade(self.ctx)
 
             self.scheduler.add_job( runner, trigger=self.trigger, name=self.name)
