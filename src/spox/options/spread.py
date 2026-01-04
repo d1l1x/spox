@@ -2,8 +2,15 @@ from typing import Tuple
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 
-from ib_async import Contract
+from ib_async import (
+    Contract,
+    Option,
+    ComboLeg,
+    Bag,
+    LimitOrder
+)
 from .core import (
     OptionStrategy,
     Right,
@@ -66,12 +73,12 @@ class Spread(OptionStrategy):
         else:  # Right.CALL
             return short_strike + width if self.type == SpreadType.CREDIT else short_strike - width
 
-    async def build(self) -> Tuple[Contract|None, Contract|None]:
+    async def build(self) -> Tuple[Option, Option]:
         spot_ticker = await self.ib.reqTickersAsync(self.underlying)
         spot = spot_ticker[0].marketPrice()
-        if spot is None:
-            self.log.error("No spot price for %s", self.underlying)
-            return None, None
+        if spot is None or math.isnan(spot):
+            self.log.error(f"No valid spot price for {self.underlying}: {spot_ticker}")
+            return Option(), Option()
 
         strikes = self._get_strike_candidates(spot, self.right, inc=self.spec.inc)
 
@@ -95,3 +102,37 @@ class Spread(OptionStrategy):
         self.ctx.log.info(f'Selected: short(strike={short.strike}) long(strike={long.strike})')
 
         return short, long
+
+    async def buy(self):
+
+        short, long= await self.build()
+
+        leg1 = ComboLeg()
+        leg1.conId = long.conId
+        leg1.ratio = 1
+        leg1.action = "BUY"
+        leg1.exchange = "SMART"
+        leg2 = ComboLeg()
+        leg2.conId = short.conId
+        leg2.ratio = 1
+        leg2.action = "SELL"
+        leg2.exchange = "SMART"
+
+        combo = Bag(
+            symbol = self.opt.spec.symbol,
+            exchange=self.opt.spec.exchange,
+            currency=self.opt.spec.currency,
+            comboLegs=[leg1, leg2]
+            )
+
+        tickers = await self.ib.reqTickersAsync(*[short, long])
+
+        # For bull put spread
+        for ticker in tickers:
+            if ticker.contract.strike == short.strike:
+                bid = ticker.bid
+            if ticker.contract.strike == long.strike:
+                ask = ticker.ask
+        lmt = ask-bid
+
+        await self.om.limit_buy(combo, 1, lmt)

@@ -10,6 +10,7 @@ from ib_async import Option, Contract, Ticker
 
 from spox.core.component import Component
 from spox.core.filter import Filter
+from spox.core.orders import OrderManager
 
 class Right(str, Enum):
     CALL = "C"
@@ -111,6 +112,8 @@ class OptionStrategy(Component):
         self.opt = OptionFactory(option_contract_spec)
 
         self.filters: List[Filter] = []
+
+        self.om = OrderManager(ctx)
 
     def add_filter(self, filter: Filter):
         self.filters.append(filter)
@@ -249,7 +252,7 @@ class OptionStrategy(Component):
         return contracts
 
 
-    async def _select_strike_delta(self, short_contracts: List[Option]) -> Contract|None:
+    async def _select_strike_delta(self, short_contracts: List[Option]) -> Option:
         """
         Select the optimal option contract based on target delta and price.
 
