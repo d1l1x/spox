@@ -4,6 +4,7 @@ from typing import Tuple
 import numpy as np
 from dataclasses import dataclass
 import math
+from pandas import DataFrame
 
 import talib
 from ib_async import (
@@ -12,16 +13,6 @@ from ib_async import (
 )
 
 from .component import Component
-
-
-class Filter(Component):
-
-    def __init__(self, ctx):
-        super().__init__(ctx)
-
-    @abstractmethod
-    async def evaluate(self) -> bool:
-        raise NotImplementedError
 
 
 class MAType(Enum):
@@ -99,25 +90,16 @@ class HistorySpec:
         return f"{years} Y"
 
 
-class CloseAboveMovingAverage(Filter):
+class Filter(Component):
 
-    def __init__(
-        self,
-        ctx,
-        contract: Contract,
-        *,
-        ma_type: MAType = MAType.SMA,
-        history: HistorySpec,
-    ) -> None:
+    def __init__(self, ctx, history:HistorySpec = HistorySpec(bar_size=BarSize.DAY_1, length=1)):
         super().__init__(ctx)
-        self.contract = contract
-        self.ma_type = ma_type
         self.history = history
 
-    async def evaluate(self) -> bool:
+    async def _req_historical_data(self, contract) -> DataFrame|None:
 
         bars = await self.ib.reqHistoricalDataAsync(
-            self.contract,
+            contract,
             endDateTime="",
             durationStr=self.history.duration_str(),
             barSizeSetting=self.history.bar_size.value,
@@ -127,12 +109,36 @@ class CloseAboveMovingAverage(Filter):
 
         if len(bars) < self.history.length:
             raise ValueError(
-                f"Not enough historical bars: got {len(bars)} "
-                f"need {self.history.length} for {self.ma_type.name} "
+                f"Not enough historical bars: got {len(bars)}. "
+                f"Needed {self.history.length} "
                 f"({self.history.bar_size.value})."
             )
 
-        df = util.df(bars)
+        return util.df(bars)
+
+
+    @abstractmethod
+    async def evaluate(self) -> bool:
+        raise NotImplementedError
+
+
+class CloseAboveMovingAverage(Filter):
+
+    def __init__(
+        self,
+        ctx,
+        contract: Contract,
+        history: HistorySpec,
+        *,
+        ma_type: MAType = MAType.SMA,
+    ) -> None:
+        super().__init__(ctx, history)
+        self.contract = contract
+        self.ma_type = ma_type
+
+    async def evaluate(self) -> bool:
+
+        df = await self._req_historical_data(self.contract)
         close = df["close"].to_numpy()
 
         ma_func = _TALIB_MA.get(self.ma_type)
@@ -159,35 +165,20 @@ class MoveUpFromOpen(Filter):
         ctx,
         contract: Contract,
         val: float,
-        *,
         history: HistorySpec,
     ) -> None:
-        super().__init__(ctx)
+        super().__init__(ctx, history)
         self.contract = contract
-        self.history = history
         self.value = val
 
     async def evaluate(self) -> bool:
 
-        bars = await self.ib.reqHistoricalDataAsync(
-            self.contract,
-            endDateTime="",
-            durationStr=self.history.duration_str(),
-            barSizeSetting=self.history.bar_size.value,
-            whatToShow=self.history.what_to_show,
-            useRTH=self.history.use_rth,
-        )
-
-        if not bars:
-            print("No daily bar data available for today.")
-            return False
-
-        df_bars = util.df(bars)
-        move_pct = (df_bars.close - df_bars.open) / df_bars.open
+        df = await self._req_historical_data(self.contract)
+        move_pct = (df.close - df.open) / df.open
 
         self.ctx.log.info(f"Filter ({self.__class__.__name__}): " 
-                          f"Open={df_bars.open.tail(1).values[0]:.2f}, "
-                          f"Close={df_bars.close.tail(1).values[0]:.2f}, "
+                          f"Open={df.open.tail(1).values[0]:.2f}, "
+                          f"Close={df.close.tail(1).values[0]:.2f}, "
                           f"Move={move_pct.tail(1).values[0] * 100:.4f}%")
 
         ready = move_pct.tail(1).values[0] >= self.value

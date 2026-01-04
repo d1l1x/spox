@@ -1,15 +1,28 @@
-from abc import abstractmethod
 from typing import Tuple
 
+from dataclasses import dataclass
 from enum import Enum
 
 from ib_async import Contract
-from .core import OptionStrategy, Right
+from .core import (
+    OptionStrategy,
+    Right,
+    OptionContractSpec,
+    VerticalSpec
+)
 
 
 class SpreadType(Enum):
     CREDIT = 1
     DEBIT = 2
+
+
+@dataclass(frozen=True, slots=True)
+class Sspread:
+    right: Right
+    stype: SpreadType
+    spec: VerticalSpec
+    contract_spec: OptionContractSpec
 
 
 class Spread(OptionStrategy):
