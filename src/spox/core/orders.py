@@ -25,8 +25,8 @@ class OrderManager(Component):
     def __init__(self, ctx: StrategyContext) -> None:
         super().__init__(ctx)
 
-    async def _on_complete_fill(self, trade):
-        self.log.info(f"Order {trade.order.orderId} filled")
+    async def _on_complete_fill(self, trade: Trade):
+        self.log.info(f"Order {trade.order.orderId} filled @{trade.orderStatus.avgFillPrice}")
         # TODO
         # Implement: Save completed orders in database
 
@@ -44,7 +44,7 @@ class OrderManager(Component):
 
         order = LimitOrder("BUY", qty, limit, tif='DAY', orderRef=order_ref)
 
-        self.ctx.log.info(f"Place limit order: {order}")
+        self.ctx.log.info(f"Place limit order: {order.orderId}: {order.totalQuantity}@{order.lmtPrice} with {order.orderComboLegs}")
         trade = self.ib.placeOrder(contract, order)
         trade.filledEvent += self._on_complete_fill
 
